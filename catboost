@@ -1,0 +1,161 @@
+#!/usr/bin/env python
+# coding: utf-8
+
+# In[ ]:
+
+
+# 查看当前挂载的数据集目录
+get_ipython().system('ls /home/aistudio/data/')
+
+
+# In[ ]:
+
+
+# 查看个人持久化工作区文件
+get_ipython().system('ls /home/aistudio/work/')
+
+
+# In[3]:
+
+
+get_ipython().system('mkdir /home/aistudio/external-libraries')
+get_ipython().system('pip install catboost -t /home/aistudio/external-libraries')
+
+
+# In[1]:
+
+
+import sys
+sys.path.append('/home/aistudio/external-libraries')
+
+
+# In[2]:
+
+
+import pandas as pd
+from sklearn.metrics import classification_report
+from sklearn.model_selection import train_test_split
+from catboost import CatBoostClassifier
+from sklearn.feature_selection import chi2, SelectPercentile
+import numpy as np
+from sklearn.preprocessing import LabelEncoder
+from sklearn.metrics import f1_score
+get_ipython().run_line_magic('matplotlib', 'inline')
+from sklearn import model_selection
+
+
+# In[3]:
+
+
+def datasplit(route):
+    data = pd.read_csv(route)
+    data.set_index(['sid'],inplace=True)
+    y = data.iloc[:]['label']
+#   x = data.drop(['label'],axis=1)
+    x = data
+    x_train,x_test,y_train,y_test = model_selection.train_test_split(x,y,test_size=0.2,random_state=42)
+    feature = x_train.append(x_test)
+    return feature,x_train,x_test,y_train,y_test
+train_test,train_x,test_x,train_y,test_y = datasplit(route = '/home/aistudio/data/data11100/round1_iflyad_anticheat_traindata_2.csv')
+
+
+# In[4]:
+
+
+train_test['time'] = pd.to_datetime(train_test['nginxtime'] , unit='ms')
+train_test['hour'] = train_test['time'].dt.hour.astype('str')
+train_test['day'] = train_test['time'].dt.day - train_test['time'].dt.day.min()
+train_test['minute'] = train_test['time'].dt.minute.astype('uint8')
+
+
+# In[5]:
+
+
+train_test.drop(['nginxtime','time','openudidmd5','idfamd5'],axis=1,inplace=True)
+train_test.fillna(method='ffill',inplace = True)
+
+
+# In[6]:
+
+
+train_test['label'] = train_test['label'].fillna(3).astype(int)
+cols_single = ['pkgname', 'adunitshowid', 'ip', 'reqrealip','osv','make',
+                    'adidmd5', 'imeimd5', 'macmd5','reqrealip','ver','model','city', 'province',  'hour',
+                    'h','w','apptype','dvctype','os']
+for i in (cols_single):
+    train_test[i + "_count"] = train_test.groupby([i])[i].transform('count')
+    train_test[i + "_rank"] = train_test[i + "_count"].rank(method='min')
+
+
+# In[7]:
+
+
+train_test = train_test.drop(['label'],axis=1)
+train_x = train_test[:len(train_x)]
+test_x = train_test[len(train_x):]
+
+
+# In[8]:
+
+
+train_test.columns
+
+
+# In[9]:
+
+
+features = ['pkgname', 'ver', 'adunitshowid', 'mediashowid', 'apptype', 'ip',
+       'city', 'province', 'reqrealip', 'adidmd5', 'imeimd5', 'macmd5',
+       'dvctype', 'model', 'make', 'ntt', 'carrier', 'os', 'osv',
+       'orientation', 'lan', 'h', 'w', 'ppi', 'hour', 'day', 'minute',
+       'pkgname_count', 'pkgname_rank', 'adunitshowid_count',
+       'adunitshowid_rank', 'ip_count', 'ip_rank', 'reqrealip_count',
+       'reqrealip_rank', 'osv_count', 'osv_rank', 'make_count', 'make_rank',
+       'adidmd5_count', 'adidmd5_rank', 'imeimd5_count', 'imeimd5_rank',
+       'macmd5_count', 'macmd5_rank', 'ver_count', 'ver_rank', 'model_count',
+       'model_rank', 'city_count', 'city_rank', 'province_count',
+       'province_rank', 'hour_count', 'hour_rank', 'h_count', 'h_rank',
+       'w_count', 'w_rank', 'apptype_count', 'apptype_rank', 'dvctype_count',
+       'dvctype_rank', 'os_count', 'os_rank']
+
+
+# In[14]:
+
+
+model = CatBoostClassifier(iterations=3000, depth=8,cat_features=features,learning_rate=0.05,
+        custom_metric='F1',eval_metric='F1',random_seed=2019,
+                            l2_leaf_reg=5.0,verbose = 200)
+model.fit(train_x,train_y)
+
+
+# In[16]:
+
+
+y_pred = model.predict(test_x)
+
+
+# In[42]:
+
+
+y_pred = y_pred.astype('int')
+
+
+# In[17]:
+
+
+dic = dict(zip(train_test.columns,model.feature_importances_))
+sorted(dic.items(),key=lambda x:x[1],reverse=True)
+
+
+# In[45]:
+
+
+len(model.feature_importances_)
+
+
+# In[18]:
+
+
+s2 = f1_score(test_y,y_pred,average='macro')
+print('s2:',s2)
+
